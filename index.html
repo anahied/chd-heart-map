@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Congenital Heart Disease Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { height: 700px; width: 90%; margin: 20px auto; border: 1px solid #ccc; }
+        .heart-icon {
+            font-size: 28px;
+            color: #d90429;
+            text-shadow: 1px 1px 2px #000000aa;
+            line-height: 1;
+        }
+        /* Style for the new input box */
+        #input-container {
+            width: 90%;
+            margin: 20px auto 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center;">❤️ CHD Community Map</h1>
+    <p style="text-align: center;">1. Select your age range. 2. Click your location on the map!</p>
+
+    <div id="input-container">
+        <label for="age-select">Your Age Range (for visualization):</label>
+        <select id="age-select">
+            <option value="">-- Select --</option>
+            <option value="Child">0 - 18 (Child)</option>
+            <option value="Young Adult">19 - 30 (Young Adult)</option>
+            <option value="Adult">31 - 50 (Adult)</option>
+            <option value="Older Adult">51+ (Older Adult)</option>
+        </select>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="map-logic.js"></script>
+</body>
+</html>
