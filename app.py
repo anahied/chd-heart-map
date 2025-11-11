@@ -1,18 +1,16 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory # MODIFIED: Added send_from_directory
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import os
-import urllib.parse
 
 app = Flask(__name__)
 
-# --- Database Connection Setup ---
+# --- Database Connection Setup (PostgreSQL for Render) ---
 
-# 1. Use the DATABASE_URL environment variable provided by the hosting service.
-#    If running locally, use a dummy URL for now (we'll connect a real one later).
+# Get the DATABASE_URL environment variable set by Render
 DATABASE_URL = os.environ.get(
     'DATABASE_URL',
-    # Dummy URL for local testing, will not connect until you set up PostgreSQL locally
+    # Dummy URL for local testing (won't connect without local PostgreSQL setup)
     'postgresql://user:password@localhost:5432/chd_map_db'
 )
 
@@ -30,7 +28,7 @@ def init_db():
     print("Attempting to initialize database schema...")
     try:
         with engine.connect() as connection:
-            # PostgreSQL uses TEXT for string fields, and SERIAL for auto-incrementing IDs
+            # PostgreSQL structure for the locations table
             connection.execute(text('''
                 CREATE TABLE IF NOT EXISTS locations (
                     id SERIAL PRIMARY KEY,
@@ -42,10 +40,20 @@ def init_db():
             connection.commit()
         print("Database schema successfully initialized.")
     except Exception as e:
+        # In deployment, this is often due to a connection issue
         print(f"ERROR: Database initialization failed. Check your connection settings. Error: {e}")
 
 # Call init_db immediately to set up the structure
 init_db()
+
+# --- Web Service Route (The Fix for 'Not Found') ---
+
+@app.route('/')
+def serve_index():
+    """Serves the index.html file when the user visits the root URL (/)."""
+    # This tells Flask to look in the current directory ('.') for 'index.html'
+    return send_from_directory('.', 'index.html')
+
 
 # --- API Endpoints ---
 
@@ -54,7 +62,6 @@ def get_hearts():
     """Retrieves all heart locations and age ranges from PostgreSQL."""
     try:
         with SessionLocal() as session:
-            # Selects all data from the locations table
             result = session.execute(text('SELECT latitude, longitude, age_range FROM locations')).fetchall()
 
             hearts_list = []
@@ -82,7 +89,7 @@ def add_heart():
 
     try:
         with SessionLocal() as session:
-            # Inserts the new data point
+            # Inserts the new data point using parameterized query
             session.execute(text('''
                 INSERT INTO locations (latitude, longitude, age_range) 
                 VALUES (:lat, :lng, :age)
@@ -107,7 +114,4 @@ if __name__ == '__main__':
         response.headers.add('Access-Control-Allow-Methods', 'GET,POST')
         return response
 
-    # Use Gunicorn locally for better testing parity
-    # Note: Flask's built-in server is fine for local testing, but using Gunicorn (if installed)
-    # is closer to the production environment.
     app.run(debug=True)
