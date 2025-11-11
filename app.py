@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory # MODIFIED: Added send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import os
@@ -46,13 +46,20 @@ def init_db():
 # Call init_db immediately to set up the structure
 init_db()
 
-# --- Web Service Route (The Fix for 'Not Found') ---
+# --- Web Service Routes (The Fixes) ---
 
+# 1. FIX: Route to serve index.html when user visits the base URL (e.g., https://your-site.onrender.com/)
 @app.route('/')
 def serve_index():
     """Serves the index.html file when the user visits the root URL (/)."""
     # This tells Flask to look in the current directory ('.') for 'index.html'
     return send_from_directory('.', 'index.html')
+
+# 2. FIX: Route to serve static files (like map-logic.js, CSS, or images)
+@app.route('/<path:filename>')
+def serve_static(filename):
+    """Serves any other file (like map-logic.js) from the root directory."""
+    return send_from_directory('.', filename)
 
 
 # --- API Endpoints ---
