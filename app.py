@@ -6,24 +6,29 @@ import os
 app = Flask(__name__)
 
 # --- Database Connection Setup (PostgreSQL for Render) ---
+
+# Get the DATABASE_URL environment variable set by Render
 DATABASE_URL = os.environ.get(
     'DATABASE_URL',
+    # Dummy URL for local testing (won't connect without local PostgreSQL setup)
     'postgresql://user:password@localhost:5432/chd_map_db'
 )
+
+# Render uses 'postgres://' which must be converted to 'postgresql://' for SQLAlchemy
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# --- Database Schema Functions (MODIFIED: Added user_id column) ---
+# --- Database Schema Functions ---
 
 def init_db():
     """Initializes the database schema if the 'locations' table doesn't exist."""
     print("Attempting to initialize database schema...")
     try:
         with engine.connect() as connection:
-            # MODIFIED: Added user_id column (TEXT)
+            # PostgreSQL structure for the locations table, including user_id
             connection.execute(text('''
                 CREATE TABLE IF NOT EXISTS locations (
                     id SERIAL PRIMARY KEY,
@@ -38,28 +43,30 @@ def init_db():
     except Exception as e:
         print(f"ERROR: Database initialization failed. Check your connection settings. Error: {e}")
 
-# This call will run, and if your table already exists, it will be skipped.
-# We will manually reset the DB on Render to apply the new column structure.
+# Call init_db immediately to set up the structure
 init_db()
 
 # --- Web Service Routes ---
+
 @app.route('/')
 def serve_index():
+    """Serves the index.html file when the user visits the root URL (/)."""
     return send_from_directory('.', 'index.html')
 
 @app.route('/<path:filename>')
 def serve_static(filename):
+    """Serves any other file (like map-logic.js) from the root directory."""
     return send_from_directory('.', filename)
 
 
-# --- API Endpoints (MODIFIED: Handles user_id) ---
+# --- API Endpoints ---
 
 @app.route('/api/hearts', methods=['GET'])
 def get_hearts():
-    """Retrieves all data, including the user_id for identification."""
+    """Retrieves all heart locations and age ranges, including ID and user_id."""
     try:
         with SessionLocal() as session:
-            # MODIFIED: SELECTING user_id and id
+            # Selecting all fields needed for front-end logic (id and user_id are crucial)
             result = session.execute(text('SELECT id, latitude, longitude, age_range, user_id FROM locations')).fetchall()
 
             hearts_list = []
@@ -69,7 +76,7 @@ def get_hearts():
                     'lat': row[1],
                     'lng': row[2],
                     'age': row[3],
-                    'user_id': row[4] # Send user_id back to client
+                    'user_id': row[4]
                 })
             return jsonify(hearts_list)
     except Exception as e:
@@ -83,14 +90,14 @@ def add_heart():
     latitude = data.get('latitude')
     longitude = data.get('longitude')
     age_range = data.get('age_range')
-    user_id = data.get('user_id') # NEW FIELD
+    user_id = data.get('user_id')
 
     if latitude is None or longitude is None or user_id is None:
         return jsonify({"error": "Missing required data"}), 400
 
     try:
         with SessionLocal() as session:
-            # MODIFIED: Added user_id to INSERT statement
+            # Inserts the new data point
             session.execute(text('''
                 INSERT INTO locations (latitude, longitude, age_range, user_id) 
                 VALUES (:lat, :lng, :age, :uid)
@@ -106,17 +113,49 @@ def add_heart():
         print(f"Error adding heart: {e}")
         return jsonify({"error": "Could not save location to database"}), 500
 
-# --- NEW DELETE API Endpoint (Will be fully implemented next step) ---
-# We will add the secure DELETE route in the next step!
+@app.route('/api/hearts/<int:heart_id>', methods=['DELETE'])
+def delete_heart(heart_id):
+    """Deletes a heart if the submitted user_id matches the owner's user_id."""
+    data = request.get_json()
+    user_id = data.get('user_id')
 
+    if not user_id:
+        return jsonify({"error": "User authentication required"}), 401
+    
+    try:
+        with SessionLocal() as session:
+            # 1. Verify ownership by selecting the user_id for the given heart_id
+            result = session.execute(text('SELECT user_id FROM locations WHERE id = :id'), {'id': heart_id}).fetchone()
+
+            if not result:
+                return jsonify({"error": "Heart not found."}), 404
+
+            db_user_id = result[0]
+            
+            # 2. Check if the submitted user_id matches the database owner ID
+            if db_user_id != user_id:
+                return jsonify({"error": "Unauthorized: You do not own this heart."}), 403
+
+            # 3. If authorized, execute deletion
+            session.execute(text('DELETE FROM locations WHERE id = :id AND user_id = :uid'), {
+                'id': heart_id, 
+                'uid': user_id
+            })
+            session.commit()
+            return jsonify({"message": f"Heart ID {heart_id} successfully removed."}), 200
+
+    except Exception as e:
+        print(f"Error deleting heart: {e}")
+        return jsonify({"error": "Database error during deletion."}), 500
 
 # --- Run the App and CORS for local testing ---
+
 if __name__ == '__main__':
     @app.after_request
     def add_cors_headers(response):
         response.headers.add('Access-Control-Allow-Origin', '*')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,POST')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,DELETE')
         return response
 
     app.run(debug=True)

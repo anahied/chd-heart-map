@@ -1,7 +1,8 @@
 // --- Configuration ---
-const API_URL = 'https://chd-heart-map-service.onrender.com/api/hearts'; // **CRUCIAL: Replace with your actual Render URL**
+// **CRUCIAL: Replace this URL with your actual Public Live URL from Render**
+const API_BASE_URL = 'https://chd-heart-map-service.onrender.com/api/hearts'; 
 
-// --- User ID Management (NEW CODE BLOCK) ---
+// --- User ID Management ---
 function generateUUID() {
     // Generates a simple but unique ID (UUID format)
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -41,13 +42,10 @@ const HeartIcon = L.divIcon({
     iconAnchor: [14, 28] 
 });
 
-// 4. Handle user clicking the map (MODIFIED: Sends user ID)
+// 4. Handle user clicking the map
 map.on('click', function(e) {
-    // Get location coordinates
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
-
-    // Get the selected age range from the dropdown
     const ageSelect = document.getElementById('age-select');
     const ageRange = ageSelect.value;
     
@@ -56,18 +54,16 @@ map.on('click', function(e) {
         popupText += `<br>Age Range: <b>${ageRange}</b>`;
     }
 
-    // A. Place a marker immediately
     L.marker([lat, lng], {icon: HeartIcon}).addTo(map)
-        .bindPopup(popupText + "<br>This is yours!") // Temporary feedback
+        .bindPopup(popupText)
         .openPopup();
 
-    // B. Send data to the Flask server
-    fetch(API_URL, {
+    // Send data to the Flask server
+    fetch(API_BASE_URL, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        // MODIFIED: Added user_id to the body
         body: JSON.stringify({ 
             latitude: lat, 
             longitude: lng,
@@ -84,9 +80,16 @@ map.on('click', function(e) {
     });
 });
 
-// 5. LOAD ALL EXISTING HEARTS from the server (MODIFIED: Checks for current user's hearts)
+// 5. LOAD ALL EXISTING HEARTS from the server
 function loadExistingHearts() {
-    fetch(API_URL)
+    // Clear existing markers before loading (important for reload!)
+    map.eachLayer(function(layer) {
+        if (layer.options.icon && layer.options.icon.options.className === 'heart-icon') {
+            map.removeLayer(layer);
+        }
+    });
+
+    fetch(API_BASE_URL)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -98,14 +101,13 @@ function loadExistingHearts() {
                 const markerLat = parseFloat(location.lat);
                 const markerLng = parseFloat(location.lng);
                 const age = location.age || "Not Specified"; 
-                const heartId = location.id; // Get the heart's unique DB ID
-                const heartUserId = location.user_id; // Get the ID of the user who placed it
+                const heartId = location.id; 
+                const heartUserId = location.user_id; 
 
                 if (!isNaN(markerLat) && !isNaN(markerLng)) {
-                    // Start popup content
                     let popupContent = `Location Shared!<br>Age Range: <b>${age}</b>`;
                     
-                    // NEW LOGIC: Check if the heart belongs to the current user
+                    // Logic: Check if the heart belongs to the current user
                     if (heartUserId === CURRENT_USER_ID) {
                         popupContent += `<br><button class="delete-btn" data-id="${heartId}">Remove My Heart</button>`;
                     }
@@ -115,7 +117,6 @@ function loadExistingHearts() {
                 }
             });
             console.log(`Successfully loaded ${data.length} existing heart locations.`);
-            // ADD EVENT LISTENER FOR DELETE BUTTONS
             addDeleteEventListeners();
         })
         .catch(error => {
@@ -123,17 +124,47 @@ function loadExistingHearts() {
         });
 }
 
-// 6. Delete Event Listener (NEW FUNCTION)
+// 6. Delete Event Listener
 function addDeleteEventListeners() {
     document.querySelectorAll('.delete-btn').forEach(button => {
         button.addEventListener('click', function() {
             const heartId = this.getAttribute('data-id');
-            if (confirm(`Are you sure you want to remove heart ID ${heartId}?`)) {
-                // We'll implement the actual DELETE fetch request later!
-                console.log(`Ready to send DELETE request for heart ID: ${heartId}`);
-                // TODO: Implement the actual deleteHeart function here
+            
+            if (confirm(`Are you sure you want to remove heart ID ${heartId}? This cannot be undone.`)) {
+                deleteHeart(heartId);
             }
         });
+    });
+}
+
+// 7. Deletion Fetch Function
+function deleteHeart(heartId) {
+    const deleteURL = `${API_BASE_URL}/${heartId}`;
+
+    fetch(deleteURL, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        // Send the user ID so the server can verify ownership
+        body: JSON.stringify({ 
+            user_id: CURRENT_USER_ID
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || "Deletion failed."); });
+        }
+        return response.json();
+    })
+    .then(data => {
+        alert(data.message);
+        // Reload markers without reloading the whole page for a smoother UX
+        loadExistingHearts(); 
+    })
+    .catch(error => {
+        console.error('Deletion Error:', error.message);
+        alert(`Deletion failed: ${error.message}`);
     });
 }
 
