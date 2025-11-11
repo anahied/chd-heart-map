@@ -6,77 +6,70 @@ import os
 app = Flask(__name__)
 
 # --- Database Connection Setup (PostgreSQL for Render) ---
-
-# Get the DATABASE_URL environment variable set by Render
 DATABASE_URL = os.environ.get(
     'DATABASE_URL',
-    # Dummy URL for local testing (won't connect without local PostgreSQL setup)
     'postgresql://user:password@localhost:5432/chd_map_db'
 )
-
-# Render uses 'postgres://' which must be converted to 'postgresql://' for SQLAlchemy
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# --- Database Schema Functions ---
+# --- Database Schema Functions (MODIFIED: Added user_id column) ---
 
 def init_db():
     """Initializes the database schema if the 'locations' table doesn't exist."""
     print("Attempting to initialize database schema...")
     try:
         with engine.connect() as connection:
-            # PostgreSQL structure for the locations table
+            # MODIFIED: Added user_id column (TEXT)
             connection.execute(text('''
                 CREATE TABLE IF NOT EXISTS locations (
                     id SERIAL PRIMARY KEY,
                     latitude REAL NOT NULL,
                     longitude REAL NOT NULL,
-                    age_range TEXT
+                    age_range TEXT,
+                    user_id TEXT NOT NULL
                 );
             '''))
             connection.commit()
         print("Database schema successfully initialized.")
     except Exception as e:
-        # In deployment, this is often due to a connection issue
         print(f"ERROR: Database initialization failed. Check your connection settings. Error: {e}")
 
-# Call init_db immediately to set up the structure
+# This call will run, and if your table already exists, it will be skipped.
+# We will manually reset the DB on Render to apply the new column structure.
 init_db()
 
-# --- Web Service Routes (The Fixes) ---
-
-# 1. FIX: Route to serve index.html when user visits the base URL (e.g., https://your-site.onrender.com/)
+# --- Web Service Routes ---
 @app.route('/')
 def serve_index():
-    """Serves the index.html file when the user visits the root URL (/)."""
-    # This tells Flask to look in the current directory ('.') for 'index.html'
     return send_from_directory('.', 'index.html')
 
-# 2. FIX: Route to serve static files (like map-logic.js, CSS, or images)
 @app.route('/<path:filename>')
 def serve_static(filename):
-    """Serves any other file (like map-logic.js) from the root directory."""
     return send_from_directory('.', filename)
 
 
-# --- API Endpoints ---
+# --- API Endpoints (MODIFIED: Handles user_id) ---
 
 @app.route('/api/hearts', methods=['GET'])
 def get_hearts():
-    """Retrieves all heart locations and age ranges from PostgreSQL."""
+    """Retrieves all data, including the user_id for identification."""
     try:
         with SessionLocal() as session:
-            result = session.execute(text('SELECT latitude, longitude, age_range FROM locations')).fetchall()
+            # MODIFIED: SELECTING user_id and id
+            result = session.execute(text('SELECT id, latitude, longitude, age_range, user_id FROM locations')).fetchall()
 
             hearts_list = []
             for row in result:
                 hearts_list.append({
-                    'lat': row[0],
-                    'lng': row[1],
-                    'age': row[2]
+                    'id': row[0],
+                    'lat': row[1],
+                    'lng': row[2],
+                    'age': row[3],
+                    'user_id': row[4] # Send user_id back to client
                 })
             return jsonify(hearts_list)
     except Exception as e:
@@ -85,25 +78,27 @@ def get_hearts():
 
 @app.route('/api/hearts', methods=['POST'])
 def add_heart():
-    """Receives location and age range and saves it to PostgreSQL."""
+    """Receives location, age range, and user ID and saves it."""
     data = request.get_json()
     latitude = data.get('latitude')
     longitude = data.get('longitude')
     age_range = data.get('age_range')
+    user_id = data.get('user_id') # NEW FIELD
 
-    if latitude is None or longitude is None:
-        return jsonify({"error": "Missing latitude or longitude"}), 400
+    if latitude is None or longitude is None or user_id is None:
+        return jsonify({"error": "Missing required data"}), 400
 
     try:
         with SessionLocal() as session:
-            # Inserts the new data point using parameterized query
+            # MODIFIED: Added user_id to INSERT statement
             session.execute(text('''
-                INSERT INTO locations (latitude, longitude, age_range) 
-                VALUES (:lat, :lng, :age)
+                INSERT INTO locations (latitude, longitude, age_range, user_id) 
+                VALUES (:lat, :lng, :age, :uid)
             '''), {
                 'lat': latitude,
                 'lng': longitude,
-                'age': age_range
+                'age': age_range,
+                'uid': user_id
             })
             session.commit()
             return jsonify({"message": "Heart location added successfully"}), 201
@@ -111,8 +106,11 @@ def add_heart():
         print(f"Error adding heart: {e}")
         return jsonify({"error": "Could not save location to database"}), 500
 
-# --- Run the App and CORS for local testing ---
+# --- NEW DELETE API Endpoint (Will be fully implemented next step) ---
+# We will add the secure DELETE route in the next step!
 
+
+# --- Run the App and CORS for local testing ---
 if __name__ == '__main__':
     @app.after_request
     def add_cors_headers(response):
