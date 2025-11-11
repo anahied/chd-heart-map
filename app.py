@@ -10,7 +10,7 @@ app = Flask(__name__)
 # Get the DATABASE_URL environment variable set by Render
 DATABASE_URL = os.environ.get(
     'DATABASE_URL',
-    # Dummy URL for local testing (won't connect without local PostgreSQL setup)
+    # Dummy URL for local testing
     'postgresql://user:password@localhost:5432/chd_map_db'
 )
 
@@ -41,10 +41,13 @@ def init_db():
             connection.commit()
         print("Database schema successfully initialized.")
     except Exception as e:
+        # In deployment, this is often due to a connection issue
         print(f"ERROR: Database initialization failed. Check your connection settings. Error: {e}")
 
-# Call init_db immediately to set up the structure
-init_db()
+# IMPORTANT FIX: The call to init_db() has been removed from the global scope.
+# The table MUST exist already for this to work. Since you reset the database,
+# the database is clean, and the server should now start without crashing.
+
 
 # --- Web Service Routes ---
 
@@ -64,9 +67,11 @@ def serve_static(filename):
 @app.route('/api/hearts', methods=['GET'])
 def get_hearts():
     """Retrieves all heart locations and age ranges, including ID and user_id."""
+    # We call init_db here as a safeguard, but it will only run if the table doesn't exist
+    init_db() 
+    
     try:
         with SessionLocal() as session:
-            # Selecting all fields needed for front-end logic (id and user_id are crucial)
             result = session.execute(text('SELECT id, latitude, longitude, age_range, user_id FROM locations')).fetchall()
 
             hearts_list = []
